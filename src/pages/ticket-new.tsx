@@ -255,8 +255,8 @@ export default function NewTicket() {
       categoryId: "",
       subcategoryId: "",
       priority: "medium",
-      assignedDepartmentId: "",
-      assignedToUserId: "",
+      assignedDepartmentId: "_auto",
+      assignedToUserId: "_auto",
       includeClientDetails: false,
       customerName: "",
       customerEmail: "",
@@ -553,8 +553,8 @@ export default function NewTicket() {
         clientMood: data.includeClientDetails ? data.clientMood || null : null,
         incidentDateTime: data.incidentDateTime ? new Date(data.incidentDateTime).toISOString() : null,
         internalNotes: data.internalNotes || null,
-        assignedDepartmentId: data.assignedDepartmentId || null,
-        assignedToUserId: data.assignedToUserId || null,
+        assignedDepartmentId: data.assignedDepartmentId && data.assignedDepartmentId !== '_auto' ? data.assignedDepartmentId : null,
+        assignedToUserId: data.assignedToUserId && data.assignedToUserId !== '_auto' ? data.assignedToUserId : null,
         reportedByUserId: user?.id || null,
         dynamicFieldData: {
           ...dynamicFieldData,
@@ -824,7 +824,7 @@ export default function NewTicket() {
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent className="bg-popover border border-border z-50">
-                              <SelectItem value="">Auto-assign (AI routing)</SelectItem>
+                              <SelectItem value="_auto">Auto-assign (AI routing)</SelectItem>
                               {departments.map((dept) => (
                                 <SelectItem key={dept.id} value={dept.id}>
                                   {dept.name}
@@ -853,7 +853,7 @@ export default function NewTicket() {
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent className="bg-popover border border-border z-50">
-                              <SelectItem value="">Auto-assign</SelectItem>
+                              <SelectItem value="_auto">Auto-assign</SelectItem>
                               {users.map((u) => (
                                 <SelectItem key={u.id} value={u.id}>
                                   {u.displayName || u.email}
