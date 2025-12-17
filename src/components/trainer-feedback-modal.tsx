@@ -49,6 +49,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
 import { TRAINERS } from "@/lib/constants";
+import { useAuth } from "@/hooks/useAuth";
 
 interface TrainerFeedbackModalProps {
   open: boolean;
@@ -126,6 +127,7 @@ const SCORE_CATEGORIES = [
 
 export function TrainerFeedbackModal({ open, onOpenChange }: TrainerFeedbackModalProps) {
   const { toast } = useToast();
+  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState("trainers");
   const [selectedTrainer, setSelectedTrainer] = useState<TrainerProfile | null>(null);
@@ -226,14 +228,125 @@ export function TrainerFeedbackModal({ open, onOpenChange }: TrainerFeedbackModa
       return;
     }
 
-    try {
-      // In a real app, this would save to the database
+    if (!feedbackForm.feedback.trim()) {
       toast({
-        title: "Feedback submitted",
-        description: `Feedback for ${selectedTrainer.name} has been recorded.`,
+        title: "Feedback required",
+        description: "Please provide written feedback before submitting.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Generate ticket number
+      const now = new Date();
+      const year = now.getFullYear().toString().slice(-2);
+      const month = (now.getMonth() + 1).toString().padStart(2, '0');
+      const day = now.getDate().toString().padStart(2, '0');
+      const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+      const ticketNumber = `TKT-${year}${month}${day}-${random}`;
+
+      // Get category ID for "Customer Service" or first available
+      const { data: categories } = await supabase
+        .from('categories')
+        .select('id, name')
+        .eq('isActive', true);
+      
+      const customerServiceCategory = categories?.find(c => 
+        c.name.toLowerCase().includes('customer') || c.name.toLowerCase().includes('service')
+      );
+      
+      // Get first studio
+      const { data: studios } = await supabase
+        .from('studios')
+        .select('id')
+        .limit(1)
+        .single();
+
+      // Determine priority based on overall rating
+      let priority = 'medium';
+      if (feedbackForm.overallRating <= 2) priority = 'high';
+      else if (feedbackForm.overallRating >= 4) priority = 'low';
+
+      // Create ticket title
+      const feedbackType = feedbackForm.overallRating >= 4 ? 'Positive Feedback' : 
+                          feedbackForm.overallRating <= 2 ? 'Concern' : 'Feedback';
+      const title = `Trainer ${feedbackType} - ${selectedTrainer.name} - ${feedbackForm.classDate || new Date().toLocaleDateString()}`;
+
+      // Build description
+      const description = `**Trainer Feedback Report**
+
+**Trainer:** ${selectedTrainer.name}
+**Specialization:** ${selectedTrainer.specialization}
+**Class Type:** ${feedbackForm.classType || 'Not specified'}
+**Class Date:** ${feedbackForm.classDate || 'Not specified'}
+
+**Overall Rating:** ${feedbackForm.overallRating}/5 ⭐
+
+**Performance Scores:**
+- Technique & Form: ${feedbackForm.technique}%
+- Communication: ${feedbackForm.communication}%
+- Motivation: ${feedbackForm.motivation}%
+- Punctuality: ${feedbackForm.punctuality}%
+- Professionalism: ${feedbackForm.professionalism}%
+
+**Customer Feedback:**
+${feedbackForm.feedback}
+
+${feedbackForm.customerName ? `**Submitted by:** ${feedbackForm.customerName}` : ''}
+${feedbackForm.customerEmail ? `**Contact:** ${feedbackForm.customerEmail}` : ''}
+
+${aiInsights ? `
+**AI Analysis:**
+- Sentiment: ${aiInsights.sentiment}
+- Score: ${aiInsights.score}/100
+${aiInsights.insights ? `- Insights: ${aiInsights.insights}` : ''}
+` : ''}`;
+
+      // Create the ticket
+      const { data: ticket, error } = await supabase
+        .from('tickets')
+        .insert([{
+          ticketNumber,
+          title,
+          description,
+          categoryId: customerServiceCategory?.id || categories?.[0]?.id,
+          studioId: studios?.id,
+          priority,
+          status: 'new',
+          source: 'trainer-feedback',
+          tags: ['trainer-feedback', selectedTrainer.specialization?.toLowerCase() || '', feedbackType.toLowerCase().replace(' ', '-')].filter(Boolean),
+          reportedByUserId: user?.id,
+          dynamicFieldData: {
+            trainerId: selectedTrainer.id,
+            trainerName: selectedTrainer.name,
+            classType: feedbackForm.classType,
+            classDate: feedbackForm.classDate,
+            overallRating: feedbackForm.overallRating,
+            scores: {
+              technique: feedbackForm.technique,
+              communication: feedbackForm.communication,
+              motivation: feedbackForm.motivation,
+              punctuality: feedbackForm.punctuality,
+              professionalism: feedbackForm.professionalism,
+            },
+            customerName: feedbackForm.customerName,
+            customerEmail: feedbackForm.customerEmail,
+            aiInsights: aiInsights || null,
+            feedbackType: 'trainer-evaluation',
+          },
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      toast({
+        title: "Feedback Ticket Created",
+        description: `Ticket ${ticketNumber} has been created for trainer feedback on ${selectedTrainer.name}.`,
       });
       
-      // Reset form
+      // Reset form and close
       setSelectedTrainer(null);
       setFeedbackForm({
         trainerId: "",
@@ -253,10 +366,12 @@ export function TrainerFeedbackModal({ open, onOpenChange }: TrainerFeedbackModa
       setAiInsights(null);
       setUploadedFiles([]);
       setActiveTab("trainers");
+      onOpenChange(false);
     } catch (error: any) {
+      console.error('Error creating trainer feedback ticket:', error);
       toast({
         title: "Error submitting feedback",
-        description: error.message,
+        description: error.message || "Failed to create feedback ticket",
         variant: "destructive",
       });
     }

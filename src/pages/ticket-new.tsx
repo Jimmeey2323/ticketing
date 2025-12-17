@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { useLocation } from "wouter";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useLocation, useSearch } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -29,6 +29,8 @@ import {
   Dumbbell,
   ChevronDown,
   ChevronUp,
+  Bot,
+  MessageCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -60,10 +62,18 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import { MomenceClientSearch } from "@/components/momence-client-search";
 import { MomenceSessionSelector } from "@/components/momence-session-selector";
+import { AIFeedbackChatbot } from "@/components/ai-feedback-chatbot";
+import { TICKET_TEMPLATES } from "@/components/ticket-templates";
 import { supabase } from "@/integrations/supabase/client";
 import { PRIORITIES, CLIENT_MOODS, CLIENT_STATUSES, TRAINERS, CLASSES } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -219,6 +229,7 @@ type TicketFormValues = z.infer<typeof ticketFormSchema>;
 
 export default function NewTicket() {
   const [, navigate] = useLocation();
+  const searchString = useSearch();
   const { toast } = useToast();
   const { user } = useAuth();
   const [ticketNumber, setTicketNumber] = useState("");
@@ -227,11 +238,19 @@ export default function NewTicket() {
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [selectedMomenceClient, setSelectedMomenceClient] = useState<any>(null);
   const [selectedMomenceSession, setSelectedMomenceSession] = useState<any>(null);
+  const [showAIChatbot, setShowAIChatbot] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   
   // Collapsible states
   const [clientDetailsOpen, setClientDetailsOpen] = useState(false);
   const [classDetailsOpen, setClassDetailsOpen] = useState(false);
   const [trainerDetailsOpen, setTrainerDetailsOpen] = useState(false);
+
+  // Parse URL params for template
+  const templateId = useMemo(() => {
+    const params = new URLSearchParams(searchString);
+    return params.get('template');
+  }, [searchString]);
 
   // Generate ticket number on mount
   useEffect(() => {
@@ -411,6 +430,46 @@ export default function NewTicket() {
     form.setValue('includeTrainerDetails', trainerDetailsOpen);
   }, [trainerDetailsOpen, form]);
 
+  // Template prefilling effect
+  useEffect(() => {
+    if (templateId && categories.length > 0) {
+      const template = TICKET_TEMPLATES.find(t => t.id === templateId);
+      if (template && !selectedTemplateId) {
+        setSelectedTemplateId(templateId);
+        
+        // Find matching category by name
+        const matchingCategory = categories.find(
+          c => c.name.toLowerCase().includes(template.category.toLowerCase().split(' ')[0]) ||
+               template.category.toLowerCase().includes(c.name.toLowerCase())
+        );
+        
+        if (matchingCategory) {
+          form.setValue('categoryId', matchingCategory.id);
+        }
+        
+        // Set form values from template
+        form.setValue('title', template.suggestedTitle);
+        form.setValue('description', template.suggestedDescription);
+        form.setValue('priority', template.priority);
+        
+        // Open relevant sections based on template
+        if (template.category.includes('Customer') || template.category.includes('Service')) {
+          setClientDetailsOpen(true);
+        }
+        if (template.suggestedDescription.toLowerCase().includes('class') || 
+            template.suggestedDescription.toLowerCase().includes('trainer')) {
+          setClassDetailsOpen(true);
+          setTrainerDetailsOpen(true);
+        }
+        
+        toast({
+          title: "Template Applied",
+          description: `Using "${template.name}" template. Please fill in the bracketed fields.`,
+        });
+      }
+    }
+  }, [templateId, categories, form, toast, selectedTemplateId]);
+
   // Generate AI title from description
   const generateTitle = useCallback(async () => {
     if (!description || description.length < 10) {
@@ -471,11 +530,37 @@ export default function NewTicket() {
   const handleMomenceSessionSelect = (session: any) => {
     setSelectedMomenceSession(session);
     if (session) {
+      // Set class details
       form.setValue("className", session.name || "");
-      if (session.teacher) {
-        form.setValue("trainerName", `${session.teacher.firstName} ${session.teacher.lastName}`.trim());
-        form.setValue("trainerEmail", session.teacher.email || "");
+      
+      // Set class date/time from session
+      if (session.startsAt) {
+        const sessionDate = new Date(session.startsAt);
+        form.setValue("classDateTime", sessionDate.toISOString().slice(0, 16));
       }
+      
+      // Set trainer details from teacher
+      if (session.teacher) {
+        const trainerFullName = `${session.teacher.firstName || ''} ${session.teacher.lastName || ''}`.trim();
+        form.setValue("trainerName", trainerFullName);
+        form.setValue("trainerEmail", session.teacher.email || "");
+        
+        // Open trainer section if we have trainer info
+        if (trainerFullName) {
+          setTrainerDetailsOpen(true);
+        }
+      }
+      
+      // Update source
+      form.setValue("source", "momence");
+      
+      // Open class details section
+      setClassDetailsOpen(true);
+      
+      toast({
+        title: "Session Selected",
+        description: `Class "${session.name}" details have been filled in.`,
+      });
     }
   };
 
@@ -704,7 +789,45 @@ export default function NewTicket() {
               </div>
             </div>
           </div>
+          <Button
+            variant="outline"
+            onClick={() => setShowAIChatbot(true)}
+            className="rounded-xl gap-2"
+          >
+            <Bot className="h-4 w-4" />
+            AI Feedback Assistant
+          </Button>
         </motion.div>
+
+        {/* Template Applied Badge */}
+        {selectedTemplateId && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+          >
+            <Card className="bg-gradient-to-r from-primary/10 to-secondary/10 border-primary/20">
+              <CardContent className="py-3 px-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">
+                    Template Applied: {TICKET_TEMPLATES.find(t => t.id === selectedTemplateId)?.name}
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedTemplateId(null);
+                    form.reset();
+                  }}
+                  className="text-xs"
+                >
+                  Clear Template
+                </Button>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -1526,6 +1649,16 @@ export default function NewTicket() {
           </form>
         </Form>
       </div>
+
+      {/* AI Feedback Chatbot Dialog */}
+      <Dialog open={showAIChatbot} onOpenChange={setShowAIChatbot}>
+        <DialogContent className="max-w-2xl p-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>AI Feedback Assistant</DialogTitle>
+          </DialogHeader>
+          <AIFeedbackChatbot onClose={() => setShowAIChatbot(false)} />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
