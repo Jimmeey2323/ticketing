@@ -323,16 +323,19 @@ export default function NewTicket() {
     queryKey: ['dynamicFields', selectedCategoryId, selectedSubcategoryId],
     queryFn: async () => {
       if (!selectedCategoryId) return [];
+      
       let query = supabase
         .from('dynamicFields')
         .select(`*, fieldType:fieldTypes(name, inputComponent)`)
         .eq('isActive', true)
-        .eq('isHidden', false);
+        .eq('isHidden', false)
+        .eq('categoryId', selectedCategoryId);
       
+      // If subcategory is selected, filter by it; otherwise show category-level fields only
       if (selectedSubcategoryId) {
         query = query.eq('subcategoryId', selectedSubcategoryId);
       } else {
-        query = query.eq('categoryId', selectedCategoryId).is('subcategoryId', null);
+        query = query.is('subcategoryId', null);
       }
       
       const { data, error } = await query.order('sortOrder');
@@ -598,7 +601,7 @@ export default function NewTicket() {
     }
   };
 
-  // Render dynamic field
+  // Render dynamic field with enhanced styling
   const renderDynamicField = (field: DynamicField) => {
     const fieldTypeName = field.fieldType?.name || '';
     const inputComponent = field.fieldType?.inputComponent || 'Input';
@@ -610,19 +613,19 @@ export default function NewTicket() {
         control={form.control}
         name={field.uniqueId as any}
         render={({ field: formField }) => (
-          <FormItem>
-            <FormLabel>
+          <FormItem className="space-y-2">
+            <FormLabel className="flex items-center gap-2 text-sm font-medium">
               {fieldLabel}
-              {field.isRequired && <span className="text-destructive ml-1">*</span>}
+              {field.isRequired && <span className="text-destructive">*</span>}
             </FormLabel>
             <FormControl>
               {inputComponent === 'Select' || fieldTypeName === 'Dropdown' ? (
                 <Select onValueChange={formField.onChange} value={(formField.value as string) || ''}>
-                  <SelectTrigger className="rounded-xl bg-background">
+                  <SelectTrigger className="rounded-xl bg-background/80 border-border/60 hover:border-primary/40 transition-colors">
                     <SelectValue placeholder={`Select ${fieldLabel.toLowerCase()}`} />
                   </SelectTrigger>
                   <SelectContent className="bg-popover border border-border z-50">
-                    {field.options?.map((opt, idx) => (
+                    {field.options?.filter(opt => opt && opt.trim() !== '').map((opt, idx) => (
                       <SelectItem key={idx} value={opt}>{opt}</SelectItem>
                     ))}
                   </SelectContent>
@@ -632,15 +635,19 @@ export default function NewTicket() {
                   placeholder={`Enter ${fieldLabel.toLowerCase()}`}
                   value={(formField.value as string) || ''}
                   onChange={formField.onChange}
-                  className="rounded-xl"
+                  className="rounded-xl bg-background/80 border-border/60 hover:border-primary/40 transition-colors min-h-24"
                 />
               ) : inputComponent === 'Checkbox' || fieldTypeName === 'Checkbox' ? (
-                <div className="flex items-center space-x-2">
+                <div className="flex items-center gap-3 p-3 rounded-xl bg-background/60 border border-border/40">
                   <Checkbox
+                    id={field.uniqueId}
                     checked={formField.value === 'Yes' || formField.value === true}
                     onCheckedChange={(checked) => formField.onChange(checked ? 'Yes' : 'No')}
+                    className="h-5 w-5"
                   />
-                  <span className="text-sm text-muted-foreground">Yes</span>
+                  <label htmlFor={field.uniqueId} className="text-sm text-foreground/80 cursor-pointer">
+                    Yes
+                  </label>
                 </div>
               ) : (
                 <Input
@@ -648,10 +655,13 @@ export default function NewTicket() {
                   placeholder={`Enter ${fieldLabel.toLowerCase()}`}
                   value={(formField.value as string) || ''}
                   onChange={formField.onChange}
-                  className="rounded-xl"
+                  className="rounded-xl bg-background/80 border-border/60 hover:border-primary/40 transition-colors"
                 />
               )}
             </FormControl>
+            {field.description && (
+              <p className="text-xs text-muted-foreground">{field.description}</p>
+            )}
             <FormMessage />
           </FormItem>
         )}
@@ -704,11 +714,13 @@ export default function NewTicket() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
             >
-              <Card className="glass-card">
-                <CardHeader>
+              <Card className="glass-card border-primary/20">
+                <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2">
-                    <FileText className="h-5 w-5 text-primary" />
-                    Issue Description
+                    <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center">
+                      <FileText className="h-4 w-4 text-primary" />
+                    </div>
+                    <span>Issue Description</span>
                   </CardTitle>
                   <CardDescription>
                     Describe the issue in detail. AI will help generate a title.
@@ -778,11 +790,13 @@ export default function NewTicket() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.15 }}
             >
-              <Card className="glass-card">
-                <CardHeader>
+              <Card className="glass-card border-primary/20">
+                <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2">
-                    <Hash className="h-5 w-5 text-primary" />
-                    Ticket Information
+                    <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-emerald-500/20 to-teal-500/20 flex items-center justify-center">
+                      <Hash className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                    <span>Ticket Information</span>
                   </CardTitle>
                   <CardDescription>
                     Auto-generated fields. Department and Owner can be changed.
@@ -879,12 +893,15 @@ export default function NewTicket() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
             >
-              <Card className="glass-card">
-                <CardHeader>
+              <Card className="glass-card border-primary/20">
+                <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2">
-                    <AlertCircle className="h-5 w-5 text-primary" />
-                    Classification & Location
+                    <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-amber-500/20 to-orange-500/20 flex items-center justify-center">
+                      <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                    </div>
+                    <span>Classification & Location</span>
                   </CardTitle>
+                  <CardDescription>Categorize and assign the ticket</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1018,25 +1035,37 @@ export default function NewTicket() {
             </motion.div>
 
             {/* Section 4: Dynamic Fields */}
-            {dynamicFields.length > 0 && (
+            {selectedCategoryId && (
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.25 }}
               >
-                <Card className="glass-card">
-                  <CardHeader>
+                <Card className="glass-card border-primary/20">
+                  <CardHeader className="pb-3">
                     <CardTitle className="flex items-center gap-2">
-                      <Zap className="h-5 w-5 text-primary" />
-                      Additional Details
-                      {fieldsLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                      <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center">
+                        <Zap className="h-4 w-4 text-primary" />
+                      </div>
+                      <span>Additional Details</span>
+                      {fieldsLoading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
                     </CardTitle>
+                    <CardDescription>
+                      {dynamicFields.length > 0 
+                        ? "Category-specific fields to help resolve this ticket"
+                        : subcategories.length > 0 && !selectedSubcategoryId
+                          ? "Select a subcategory above to see additional fields"
+                          : "No additional fields for this category"
+                      }
+                    </CardDescription>
                   </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {dynamicFields.map(renderDynamicField)}
-                    </div>
-                  </CardContent>
+                  {dynamicFields.length > 0 && (
+                    <CardContent className="pt-0">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 p-4 bg-muted/20 rounded-xl border border-border/50">
+                        {dynamicFields.map(renderDynamicField)}
+                      </div>
+                    </CardContent>
+                  )}
                 </Card>
               </motion.div>
             )}
